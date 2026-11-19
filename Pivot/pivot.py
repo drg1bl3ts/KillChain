@@ -167,7 +167,8 @@ def ligolo_setup(args):
     print(f"""
     {cyan('session')}
     {dim('# Select the session number')}
-    {cyan('start')}
+    {cyan(f'interface_create --name {tun_name}')}
+    {cyan(f'tunnel_start --tun {tun_name}')}
 """)
 
     # Step 6: Verify
@@ -176,6 +177,17 @@ def ligolo_setup(args):
     print(f"""
     {cyan(f'ping -c 1 {internal_example}')}
     {cyan(f'nmap -sn {internal_net}')}
+""")
+
+    # Loopback tip
+    print(f"  {bold(yellow('Tip:'))} Reach {bold("agent's localhost")} via magic CIDR {bold('240.0.0.1')}")
+    print(f"""
+    {dim('Add a route for the agent host loopback (attacker shell):')}
+    {cyan(f'sudo ip route add 240.0.0.1/32 dev {tun_name}')}
+
+    {dim('240.0.0.1 = 127.0.0.1 on the pivot host — reach services bound to localhost:')}
+    {cyan(f'nmap -sV -p 1433,3306,5432 240.0.0.1')}
+    {cyan(f'impacket-mssqlclient sa:password@240.0.0.1')}
 """)
 
     # Listener guidance

