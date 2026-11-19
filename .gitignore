@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+~/.oscp_session.json
+.venv/
+.vscode/
+notes.txt
+*.bak.*
