@@ -38,7 +38,7 @@ TOOLS = {
     "fruit":    BASE / "Recon"    / "fruitpicker.py",
     "web":      BASE / "Recon"    / "webrecon.py",
     "test":     BASE / "Recon"    / "webtester.py",
-    "lfi":      BASE / "Recon"    / "lfi_scan.py",
+    "lfi":      BASE / "Recon"    / "lfi_scan.sh",
     "xfind":    BASE / "Recon"    / "xfind.py",
     "shell":    BASE / "RevShell" / "revshell.py",
     "privesc":  BASE / "PrivEsc"  / "privesc.py",
@@ -251,8 +251,8 @@ def cmd_ad(args):
     # Inject session defaults if not already provided
     if "-d" not in extra and "--domain" not in extra and sess.get("domain"):
         extra += ["--domain", sess["domain"]]
-    if "--dc" not in extra and sess.get("dc_ip"):
-        extra += ["--dc", sess["dc_ip"]]
+    if "--dc-ip" not in extra and sess.get("dc_ip"):
+        extra += ["--dc-ip", sess["dc_ip"]]
     if "-u" not in extra and "--user" not in extra and sess.get("user"):
         extra += ["-u", sess["user"]]
     if "-p" not in extra and "--password" not in extra and sess.get("password"):

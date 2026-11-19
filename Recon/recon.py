@@ -814,7 +814,7 @@ def main():
         sys.exit(1)
 
     optional = ["gobuster", "whatweb", "enum4linux-ng", "snmpwalk",
-                "smbclient", "dig", "nikto", "ldapsearch", "crackmapexec"]
+                "smbclient", "dig", "nikto", "ldapsearch", "nxc"]
     available = [t for t in optional if tool_exists(t)]
     not_available = [t for t in optional if not tool_exists(t)]
     if not_available:
