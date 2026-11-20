@@ -12,8 +12,50 @@ No dependencies beyond Python 3.6+ stdlib.
 import argparse
 import json
 import os
+import shutil
 import sys
 import textwrap
+
+# ───────────────── Impacket tool resolver ─────────────────
+# Arch/pipx installs as `impacket-secretsdump`
+# Exegol/Kali installs as `secretsdump.py` (or bare alias `secretsdump`)
+# This resolves whichever is on PATH so copy-paste commands are correct.
+
+_IMPACKET_ALIASES = {
+    "impacket-secretsdump": ("secretsdump.py", "secretsdump"),
+    "impacket-GetUserSPNs": ("GetUserSPNs.py",),
+    "impacket-GetNPUsers":  ("GetNPUsers.py",),
+    "impacket-getST":       ("getST.py",),
+    "impacket-getTGT":      ("getTGT.py",),
+    "impacket-psexec":      ("psexec.py", "psexec"),
+    "impacket-wmiexec":     ("wmiexec.py", "wmiexec"),
+    "impacket-smbexec":     ("smbexec.py",),
+    "impacket-ticketer":    ("ticketer.py",),
+    "impacket-dacledit":    ("dacledit.py",),
+    "impacket-addcomputer": ("addcomputer.py",),
+    "impacket-rbcd":        ("rbcd.py",),
+    "impacket-mssqlclient": ("mssqlclient.py",),
+    # These appear bare in commands — resolve in reverse on Arch
+    "ntlmrelayx.py":        ("ntlmrelayx.py", "impacket-ntlmrelayx", "ntlmrelayx"),
+    "smbserver.py":         ("smbserver.py", "impacket-smbserver", "smbserver"),
+    "reg.py":               ("reg.py", "impacket-reg"),
+}
+
+_TOOL_CACHE: dict = {}
+
+def _resolve(canonical: str, alternatives: tuple) -> str:
+    if canonical in _TOOL_CACHE:
+        return _TOOL_CACHE[canonical]
+    if shutil.which(canonical):
+        _TOOL_CACHE[canonical] = canonical
+        return canonical
+    for alt in alternatives:
+        if shutil.which(alt):
+            _TOOL_CACHE[canonical] = alt
+            return alt
+    _TOOL_CACHE[canonical] = canonical
+    return canonical
+
 
 # ───────────────── ANSI helpers ───────────────────────────
 
@@ -908,6 +950,15 @@ def fill_template(cmd, ctx):
     result = cmd
     for key, val in ctx.items():
         result = result.replace("{" + key + "}", str(val))
+
+    # Resolve impacket tool names for this platform
+    # (Arch/pipx: impacket-X  |  Exegol/Kali: X.py or bare alias)
+    for canonical, alternatives in _IMPACKET_ALIASES.items():
+        if canonical in result:
+            resolved = _resolve(canonical, alternatives)
+            if resolved != canonical:
+                result = result.replace(canonical, resolved)
+
     return result
 
 
