@@ -268,9 +268,9 @@ def scan_sensitive_files(url, outdir):
         if resp and resp.status_code == 200:
             # Filter out generic 200s (custom 404 pages)
             if len(resp.text) > 50:
-                # Check it's not just a redirect to home/login
-                if resp.url.rstrip("/") != url.rstrip("/"):
-                    pass  # redirected — might still be valid
+                # Drop responses that redirected back to the base URL (custom 404)
+                if resp.url.rstrip("/") == url.rstrip("/"):
+                    return None
                 return (path, desc, len(resp.text))
         return None
 

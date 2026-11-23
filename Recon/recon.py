@@ -184,14 +184,14 @@ def _save_nmap_output(nm, outfile):
 
 
 def nmap_quick(target, outdir):
-    """Full TCP scan - all 65535 ports with service detection using python-nmap."""
-    log("[*]", f"Nmap full TCP scan starting (-p- --min-rate 1000)...", cyan)
+    """Top-1000 TCP port scan with service detection — fast initial discovery."""
+    log("[*]", f"Nmap quick scan (top 1000 ports, -sC -sV)...", cyan)
     outfile = f"{outdir}/nmap/quick_tcp.txt"
 
     nm = pynmap.PortScanner()
     try:
-        nm.scan(hosts=target, ports="1-65535",
-                arguments="-sC -sV -Pn --open --min-rate 1000")
+        nm.scan(hosts=target,
+                arguments="-sC -sV -Pn --open --top-ports 1000 --min-rate 1000")
     except pynmap.PortScannerError as e:
         log("[!]", f"Nmap error: {e}", red)
         if "requires root" in str(e).lower():

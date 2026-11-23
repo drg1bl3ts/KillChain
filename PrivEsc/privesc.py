@@ -163,9 +163,10 @@ def enum_system_info():
     kernel = cmd("uname -r")
     if kernel:
         kernel_exploits = [
-            (r"3\.[0-9]+\.", "DirtyCow (CVE-2016-5195) — check kernel 2.6.22 < 4.8.3"),
-            (r"4\.[0-9]+\.", "Check for DirtyPipe (CVE-2022-0847) on 5.8+"),
-            (r"5\.([8-9]|1[0-6])\.", "DirtyPipe (CVE-2022-0847) — kernel 5.8 to 5.16.11"),
+            (r"2\.6\.(2[2-9]|[3-9][0-9])\.", "DirtyCow (CVE-2016-5195) — kernel 2.6.22–4.8.2"),
+            (r"3\.[0-9]+\.", "DirtyCow (CVE-2016-5195) — kernel 2.6.22–4.8.2"),
+            (r"4\.[0-7]\.", "DirtyCow (CVE-2016-5195) — kernel 2.6.22–4.8.2"),
+            (r"5\.([8-9]|1[0-6])\.", "DirtyPipe (CVE-2022-0847) — kernel 5.8–5.16.11"),
         ]
         for pattern, note in kernel_exploits:
             if re.search(pattern, kernel):

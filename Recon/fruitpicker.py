@@ -146,7 +146,7 @@ def check_smb(target):
             log("[+]", f"  Found {user_count} domain user(s)", green)
 
     # CME/NXC fingerprint
-    for tool in ["crackmapexec", "netexec"]:
+    for tool in ["nxc", "netexec", "crackmapexec"]:
         if tool_exists(tool):
             rc, output = run_cmd(f"{tool} smb {target} 2>&1", timeout=15)
             if output.strip():
@@ -499,8 +499,10 @@ def run_fruit_picker(args):
             print()
 
         if svc == "snmp" or port == 161:
-            check_snmp(target)
-            print()
+            if "snmp" not in checked:
+                checked.add("snmp")
+                check_snmp(target)
+                print()
 
         if svc in ("ldap", "ldaps") or port in (389, 636):
             check_ldap(target)
@@ -518,7 +520,7 @@ def run_fruit_picker(args):
             check_rdp(target, port)
             print()
 
-    # Also check SNMP on UDP if not already found
+    # Also probe SNMP on UDP if not already discovered in port scan
     if "snmp" not in checked and not args.skip_udp:
         log("[*]", "Probing UDP SNMP...", cyan)
         check_snmp(target)
